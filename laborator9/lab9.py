@@ -1,120 +1,192 @@
 import tkinter as tk
-from tkinter import colorchooser, filedialog
-from tkinter import messagebox
+from tkinter import filedialog, colorchooser, ttk
+from PIL import Image, ImageDraw, ImageTk
 
-class RedactorGrafic:
+
+class MiniPaint:
     def __init__(self, root):
         self.root = root
-        self.root.title("Redactor Grafic")
-        
-        # Initializare canvas pentru desen
-        self.canvas = tk.Canvas(root, width=800, height=600, bg="white")
-        self.canvas.pack(side=tk.TOP, padx=10, pady=10)
+        self.root.title("Mini Paint Funcțional")
+        self.root.attributes('-fullscreen', True)  # Pornire în modul ecran complet
+        self.root.bind("<Escape>", self.exit_fullscreen)
 
-        # Variabile de culoare
+        # Dimensiuni canvas
+        self.canvas_width = self.root.winfo_screenwidth()
+        self.canvas_height = self.root.winfo_screenheight() - 100  # Spațiu pentru toolbar
+
+        # Variabile
+        self.current_color = "black"
         self.bg_color = "white"
-        self.fg_color = "black"
+        self.brush_size = 5
+        self.fill_color = "red"  # Culoarea pentru funcția de umplere
+        self.curve_points = []  # Punctele pentru curba Bezier
+        self.edit_mode = False  # Mod de editare a obiectelor existente
+        self.selected_item = None  # Obiect selectat pentru modificare
 
-        # Variabila pentru instrumentul curent
-        self.current_tool = "linie"
+        # Imaginea curentă
+        self.image = Image.new("RGB", (self.canvas_width, self.canvas_height), self.bg_color)
+        self.draw = ImageDraw.Draw(self.image)
 
-        # Crearea barei de instrumente
-        self.create_toolbar()
+        # Configurare UI
+        self.setup_toolbar()
+        self.setup_color_bar()
+        self.setup_canvas()
 
-    def create_toolbar(self):
-        toolbar = tk.Frame(self.root)
-        toolbar.pack(side=tk.LEFT, padx=10, pady=10)
-        
-        # Butoane pentru instrumente
-        self.rect_btn = tk.Button(toolbar, text="Dreptunghi", command=self.select_rectangle)
-        self.rect_btn.pack(fill=tk.X)
-        
-        self.oval_btn = tk.Button(toolbar, text="Oval", command=self.select_oval)
-        self.oval_btn.pack(fill=tk.X)
+    def exit_fullscreen(self, event=None):
+        """Ieșire din modul fullscreen."""
+        self.root.attributes('-fullscreen', False)
 
-        self.line_btn = tk.Button(toolbar, text="Linie", command=self.select_line)
-        self.line_btn.pack(fill=tk.X)
-        
-        self.clear_btn = tk.Button(toolbar, text="Sterge", command=self.clear_canvas)
-        self.clear_btn.pack(fill=tk.X)
-        
-        self.save_btn = tk.Button(toolbar, text="Salveaza", command=self.save_image)
-        self.save_btn.pack(fill=tk.X)
-        
-        self.load_btn = tk.Button(toolbar, text="Deschide", command=self.load_image)
-        self.load_btn.pack(fill=tk.X)
+    def setup_toolbar(self):
+        """Configurarea barei de instrumente."""
+        toolbar = tk.Frame(self.root, relief=tk.RAISED, bd=2)
+        toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        # Butoane pentru selectarea culorii
-        self.color_btn = tk.Button(toolbar, text="Alege Culoare", command=self.choose_color)
-        self.color_btn.pack(fill=tk.X)
-        
-        # Bara de culori
-        color_toolbar = tk.Frame(self.root)
-        color_toolbar.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        self.bg_color_btn = tk.Button(color_toolbar, text="Culoare fundal", command=self.choose_bg_color)
-        self.bg_color_btn.pack(side=tk.LEFT, padx=5)
+        # Butoane
+        tk.Button(toolbar, text="Salvează", command=self.save_image).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(toolbar, text="Deschide", command=self.open_image).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(toolbar, text="Clear", command=self.clear_canvas).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(toolbar, text="Imagine Nouă", command=self.new_image).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(toolbar, text="Alege Culoare", command=self.choose_fill_color).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(toolbar, text="Editează Obiect", command=self.toggle_edit_mode).pack(side=tk.LEFT, padx=5, pady=5)
 
-    def choose_color(self):
-        color = colorchooser.askcolor()[1]
-        if color:
-            self.fg_color = color
+        # Selectarea figurii
+        self.shape = tk.StringVar(value="linie dreaptă")
+        shapes = ["linie dreaptă", "linie curbată (Bezier)", "dreptunghi", "oval", "guma"]
+        ttk.Combobox(toolbar, textvariable=self.shape, values=shapes, state="readonly").pack(side=tk.LEFT, padx=5, pady=5)
 
-    def choose_bg_color(self):
-        color = colorchooser.askcolor()[1]
-        if color:
-            self.bg_color = color
-            self.canvas.config(bg=self.bg_color)
+        # Dimensiunea pensulei
+        self.brush_size_var = tk.IntVar(value=self.brush_size)
+        ttk.Combobox(toolbar, textvariable=self.brush_size_var, values=list(range(1, 21)), state="readonly").pack(side=tk.LEFT, padx=5, pady=5)
 
-    def select_rectangle(self):
-        self.current_tool = "dreptunghi"
+    def setup_color_bar(self):
+        """Configurarea barei de culori."""
+        color_bar = tk.Frame(self.root, relief=tk.RAISED, bd=2)
+        color_bar.pack(side=tk.TOP, fill=tk.X)
 
-    def select_oval(self):
-        self.current_tool = "oval"
+        tk.Button(color_bar, text="Culoare desen", command=self.choose_draw_color).pack(side=tk.LEFT, padx=5, pady=5)
+        tk.Button(color_bar, text="Culoare fundal", command=self.choose_bg_color).pack(side=tk.LEFT, padx=5, pady=5)
 
-    def select_line(self):
-        self.current_tool = "linie"
+    def setup_canvas(self):
+        """Configurarea canvas-ului."""
+        self.canvas = tk.Canvas(self.root, width=self.canvas_width, height=self.canvas_height, bg=self.bg_color)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
 
-    def clear_canvas(self):
-        self.canvas.delete("all")
+        # Evenimente
+        self.canvas.bind("<Button-1>", self.start_draw)
+        self.canvas.bind("<B1-Motion>", self.draw_shape)
+        self.canvas.bind("<ButtonRelease-1>", self.finish_draw)
+
+    def new_image(self):
+        """Creează o imagine nouă."""
+        self.image = Image.new("RGB", (self.canvas_width, self.canvas_height), self.bg_color)
+        self.draw = ImageDraw.Draw(self.image)
+        self.clear_canvas()
 
     def save_image(self):
-        messagebox.showinfo("Salvare", "Nu este.")
+        """Salvează imaginea curentă."""
+        file_path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG files", "*.png"), ("All files", "*.*")])
+        if file_path:
+            self.image.save(file_path)
 
-    def load_image(self):
-        messagebox.showinfo("Deschidere", "nu este.")
+    def open_image(self):
+        """Deschide o imagine existentă."""
+        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.png;*.jpg;*.jpeg"), ("All files", "*.*")])
+        if file_path:
+            self.image = Image.open(file_path).resize((self.canvas_width, self.canvas_height))
+            self.draw = ImageDraw.Draw(self.image)
+            self.update_canvas()
 
-    def draw_shape(self, event):
-        if self.current_tool == "linie":
-            # Desenează o linie continuă pe măsură ce se mișcă mouse-ul
-            self.canvas.create_line(self.start_x, self.start_y, event.x, event.y, fill=self.fg_color)
-            # Colorează fundalul (pixelii pe unde trece linia)
-            self.canvas.create_rectangle(self.start_x, self.start_y, event.x, event.y, outline=self.fg_color, fill=self.fg_color)
-            self.start_x = event.x
-            self.start_y = event.y
-        elif self.current_tool == "dreptunghi":
-            # Desenează un dreptunghi pe măsură ce utilizatorul trage mouse-ul
-            self.canvas.create_rectangle(self.start_x, self.start_y, event.x, event.y, outline=self.fg_color)
-        elif self.current_tool == "oval":
-            # Desenează un oval pe măsură ce utilizatorul trage mouse-ul
-            self.canvas.create_oval(self.start_x, self.start_y, event.x, event.y, outline=self.fg_color)
+    def clear_canvas(self):
+        """Curăță canvas-ul."""
+        self.canvas.delete("all")
+        self.image.paste(self.bg_color, [0, 0, self.canvas_width, self.canvas_height])
+        self.update_canvas()
+
+    def update_canvas(self):
+        """Actualizează canvas-ul cu imaginea curentă."""
+        self.tk_image = ImageTk.PhotoImage(self.image)
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_image)
+
+    def choose_draw_color(self):
+        """Selectează culoarea de desen."""
+        color = colorchooser.askcolor(color=self.current_color)[1]
+        if color:
+            self.current_color = color
+
+    def choose_bg_color(self):
+        """Selectează culoarea de fundal."""
+        color = colorchooser.askcolor(color=self.bg_color)[1]
+        if color:
+            self.bg_color = color
+            self.new_image()
+
+    def choose_fill_color(self):
+        """Alege culoarea pentru funcția de umplere."""
+        color = colorchooser.askcolor(color=self.fill_color)[1]
+        if color:
+            self.fill_color = color
+
+    def toggle_edit_mode(self):
+        """Comută modul de editare."""
+        self.edit_mode = not self.edit_mode
+        self.canvas.config(cursor="hand2" if self.edit_mode else "arrow")
 
     def start_draw(self, event):
-        self.start_x = event.x
-        self.start_y = event.y
-        if self.current_tool == "linie":
-            self.canvas.bind("<B1-Motion>", self.draw_shape)
-        elif self.current_tool in ["dreptunghi", "oval"]:
-            self.canvas.bind("<B1-Motion>", self.draw_shape)
+        """Începe desenarea."""
+        if self.edit_mode:
+            self.select_item(event.x, event.y)
+            return
 
-    def stop_draw(self, event):
-        self.canvas.unbind("<B1-Motion>")
+        self.start_x, self.start_y = event.x, event.y
+        if self.shape.get() == "linie curbată (Bezier)":
+            self.curve_points = [(self.start_x, self.start_y)]
+
+    def draw_shape(self, event):
+        """Desenează pe canvas."""
+        if self.edit_mode:
+            return
+
+        x, y = event.x, event.y
+        self.canvas.delete("preview")  # Șterge previzualizarea anterioară
+
+        if self.shape.get() == "linie dreaptă":
+            self.canvas.create_line(self.start_x, self.start_y, x, y, fill=self.current_color, width=self.brush_size_var.get(), tags="preview")
+        elif self.shape.get() == "linie curbată (Bezier)":
+            self.curve_points.append((x, y))
+            self.canvas.create_line(self.curve_points, fill=self.current_color, width=self.brush_size_var.get(), tags="preview")
+        elif self.shape.get() == "dreptunghi":
+            self.canvas.create_rectangle(self.start_x, self.start_y, x, y, fill=self.fill_color, outline=self.current_color, tags="preview")
+        elif self.shape.get() == "oval":
+            self.canvas.create_oval(self.start_x, self.start_y, x, y, fill=self.fill_color, outline=self.current_color, tags="preview")
+        elif self.shape.get() == "guma":
+            self.canvas.create_rectangle(x - self.brush_size, y - self.brush_size, x + self.brush_size, y + self.brush_size, fill=self.bg_color, outline=self.bg_color)
+
+    def finish_draw(self, event):
+        """Finalizează desenul."""
+        if self.edit_mode:
+            return
+
+        x, y = event.x, event.y
+        if self.shape.get() == "linie dreaptă":
+            self.draw.line([self.start_x, self.start_y, x, y], fill=self.current_color, width=self.brush_size_var.get())
+        elif self.shape.get() == "linie curbată (Bezier)":
+            self.curve_points.append((x, y))
+            self.draw.line(self.curve_points, fill=self.current_color, width=self.brush_size_var.get())
+        elif self.shape.get() == "dreptunghi":
+            self.draw.rectangle([self.start_x, self.start_y, x, y], fill=self.fill_color, outline=self.current_color)
+        elif self.shape.get() == "oval":
+            self.draw.ellipse([self.start_x, self.start_y, x, y], fill=self.fill_color, outline=self.current_color)
+        self.update_canvas()
+
+    def select_item(self, x, y):
+        """Selectează un obiect existent pentru modificare."""
+        closest = self.canvas.find_closest(x, y)
+        self.selected_item = closest[0] if closest else None
+        if self.selected_item:
+            self.canvas.itemconfig(self.selected_item, outline="blue")  # Evidențiază obiectul
+
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = RedactorGrafic(root)
-
-    app.canvas.bind("<ButtonPress-1>", app.start_draw)
-    app.canvas.bind("<ButtonRelease-1>", app.stop_draw)
-
+    app = MiniPaint(root)
     root.mainloop()
